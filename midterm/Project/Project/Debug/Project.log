@@ -1,0 +1,4 @@
+﻿  main.cpp
+c:\users\yunshan\desktop\mutiplayermidterm\midterm\project\project\main.cpp(691): warning C4477: 'printf' : format string '%I64u' requires an argument of type 'unsigned __int64', but variadic argument 1 has type 'RakNet::RakNetGUID'
+c:\users\yunshan\desktop\mutiplayermidterm\midterm\project\project\main.cpp(875): warning C4101: 'statinput': unreferenced local variable
+  Project.vcxproj -> C:\Users\Yunshan\Desktop\MutiplayerMidterm\midterm\Project\Debug\Project.exe
