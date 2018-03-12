@@ -7,12 +7,15 @@
 #include <chrono>
 #include <map>
 #include <mutex>
+#include <Windows.h>
 
 static unsigned int SERVER_PORT = 65000;
 static unsigned int CLIENT_PORT = 65001;
 static unsigned int MAX_CONNECTIONS = 3;
 static int index = 0;
 static int playrind = 0;
+static bool doOnce2 = false;
+static bool ischecked = false;
 enum NetworkState
 {
 	NS_Init = 0,
@@ -44,11 +47,14 @@ enum {
 	ID_THEGAME_START,
 	ID_CEACK_ALL_READY,
 	ID_MAIN_GAME,
-	ID_THELOOP,
+	ID_THEWAITING,
 	ID_healinf,
 	ID_deaminf,
 	ID_win,
 	ID_dead,
+	ID_CHECK_STAT,
+	ID_SENT_STAT,
+	ID_LEAVE,
 };
 
 enum EPlayerClass
@@ -70,6 +76,7 @@ struct SPlayer
 	int Damge;
 	int heal;
 	int index = 4;
+	int targetindex = 0;
 	stats thestat;
 	bool isdealth = false;
 	RakNet::RakString targetstring;
@@ -107,12 +114,16 @@ struct SPlayer
 	void order(RakNet::SystemAddress systemAddress, bool isBroadcast) {
 		RakNet::BitStream writeBs;
 		writeBs.Write((RakNet::MessageID)ID_MAIN_GAME);
+		int a[2];
+		a[0] = m_health;
+		a[1] = index;
+		writeBs.Write(a);
 		RakNet::RakString name(m_name.c_str());
 		writeBs.Write(name);
 		EPlayerClass sendclassinf = m_class;
 		writeBs.Write(sendclassinf);
-		int sendhealth = m_health;
-		writeBs.Write(sendhealth);
+		//int sendhealth = m_health;
+		//writeBs.Write(sendhealth);
 		
 		
 		//returns 0 when something is wrong
@@ -126,8 +137,11 @@ struct SPlayer
 		writeBs.Write(name);
 		EPlayerClass sendclassinf = m_class;
 		writeBs.Write(sendclassinf);
-		int sendhealth = m_health;
-		writeBs.Write(sendhealth);
+		int a[2];
+		a[0] = m_health;
+		a[1] = index;
+		
+		writeBs.Write(a);
 
 		//returns 0 when something is wrong
 		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
@@ -139,8 +153,12 @@ struct SPlayer
 		writeBs.Write(name);
 		EPlayerClass sendclassinf = m_class;
 		writeBs.Write(sendclassinf);
-		int sendhealth = m_health;
-		writeBs.Write(sendhealth);
+	
+		
+		int a[2];
+		a[0] = Damge;
+		a[1] = targetindex;
+		writeBs.Write(a);
 		writeBs.Write(targetstring);
 		//returns 0 when something is wrong
 		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
@@ -150,11 +168,10 @@ struct SPlayer
 		writeBs.Write((RakNet::MessageID)ID_dead);
 		RakNet::RakString name(m_name.c_str());
 		writeBs.Write(name);
-		EPlayerClass sendclassinf = m_class;
-		writeBs.Write(sendclassinf);
-		int sendhealth = m_health;
-		writeBs.Write(sendhealth);
-		writeBs.Write(targetstring);
+	
+		
+		writeBs.Write(index);
+		
 		//returns 0 when something is wrong
 		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
 	}
@@ -163,25 +180,108 @@ struct SPlayer
 		writeBs.Write((RakNet::MessageID)ID_win);
 		RakNet::RakString name(m_name.c_str());
 		writeBs.Write(name);
+		
+		
+		writeBs.Write(index);
+		
+		//returns 0 when something is wrong
+		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
+	}
+	void wait(RakNet::SystemAddress systemAddress, bool isBroadcast) {
+		RakNet::BitStream writeBs;
+		writeBs.Write((RakNet::MessageID)ID_THEWAITING);
+		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
+	}
+
+	void sendstat(RakNet::SystemAddress systemAddress, bool isBroadcast) {
+		RakNet::BitStream writeBs;
+		writeBs.Write((RakNet::MessageID)ID_SENT_STAT);
+		RakNet::RakString name(m_name.c_str());
+		writeBs.Write(name);
 		EPlayerClass sendclassinf = m_class;
 		writeBs.Write(sendclassinf);
 		int sendhealth = m_health;
 		writeBs.Write(sendhealth);
-		
-		//returns 0 when something is wrong
+		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
+	}
+	void leave(RakNet::SystemAddress systemAddress, bool isBroadcast) {
+		RakNet::BitStream writeBs;
+		writeBs.Write((RakNet::MessageID)ID_LEAVE);
 		assert(g_rakPeerInterface->Send(&writeBs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, systemAddress, isBroadcast));
 	}
 };
 
 std::map<unsigned long, SPlayer> m_players;
+
+void leavegame(RakNet::Packet* packet) {
+	std::cout<<"you are dead"<<std::endl;
+	Sleep(5000);
+	exit(0);
+}
+void sendstat(RakNet::Packet* packet) {
+	RakNet::BitStream bs(packet->data, packet->length, false);
+	RakNet::MessageID messageId;
+	bs.Read(messageId);
+	RakNet::RakString userName;
+	bs.Read(userName);
+	EPlayerClass sendclassinf;
+	bs.Read(sendclassinf);
+	int sendhealth;
+	bs.Read(sendhealth);
+
+	std::cout << "User name: " << userName << std::endl;
+	std::cout << "health: " << sendhealth << std::endl;
+	if (sendclassinf == 0)
+	{
+		std::cout << "class: Mage" << std::endl;
+
+	}
+	else if (sendclassinf == 1)
+	{
+		std::cout << "class: Rogue" << std::endl;
+
+	}
+	else if (sendclassinf == 2)
+	{
+		std::cout << "class: Knight" << std::endl;
+
+	}
+	//doOnce2 = false;
+	//ischecked = false;
+	//g_networkState_mutex.lock();
+	//g_networkState = NS_Pending;
+	//g_networkState_mutex.unlock();
+}
+void checkstat(RakNet::Packet* packet) {
+	unsigned long guid = RakNet::RakNetGUID::ToUint32(packet->guid);
+	std::map<unsigned long, SPlayer>::iterator it = m_players.find(guid);
+	//somehow player didn't connect but now is in lobby ready
+	assert(it != m_players.end());
+
+	SPlayer& currentplayer = it->second;
+	currentplayer.sendstat(currentplayer.playeraddress, false);
+}
+
+void waitting(RakNet::Packet* packet) {
+	RakNet::BitStream bs(packet->data, packet->length, false);
+	RakNet::MessageID messageId;
+	bs.Read(messageId);
+	doOnce2 = false;
+	ischecked = false;
+	g_networkState_mutex.lock();
+	g_networkState = NS_RealStartwaitgame;
+	g_networkState_mutex.unlock();
+}
 void dead(RakNet::Packet* packet) {
 	RakNet::BitStream bs(packet->data, packet->length, false);
 	RakNet::MessageID messageId;
 	bs.Read(messageId);
 	RakNet::RakString userName;
 	bs.Read(userName);
+	int indexx;
+	bs.Read(indexx);
+	std::cout << userName <<" Player"<<indexx<< " is dead."<< std::endl;
 	
-	std::cout << userName << " is dead."<< std::endl;
 }
 void win(RakNet::Packet* packet) {
 	RakNet::BitStream bs(packet->data, packet->length, false);
@@ -189,8 +289,9 @@ void win(RakNet::Packet* packet) {
 	bs.Read(messageId);
 	RakNet::RakString userName;
 	bs.Read(userName);
-	
-	std::cout << userName << " is winner." << std::endl;
+	int indexx;
+	bs.Read(indexx);
+	std::cout << userName << " Player" << indexx<< " is winner." << std::endl;
 }
 void deamin(RakNet::Packet* packet) {
 	RakNet::BitStream bs(packet->data, packet->length, false);
@@ -200,11 +301,11 @@ void deamin(RakNet::Packet* packet) {
 	bs.Read(userName);
 	EPlayerClass sendclassinf;
 	bs.Read(sendclassinf);
-	int sendhealth;
-	bs.Read(sendhealth);
+	int a[2];
+	bs.Read(a);
 	RakNet::RakString targetstring;
 	bs.Read(targetstring);
-	std::cout << userName << " hit " << targetstring << " right now." << std::endl;
+	std::cout << userName << " has done " << a[0] << " damage on "<< targetstring <<" player"<<a[1]<< " right now." << std::endl;
 }
 void healin(RakNet::Packet* packet) {
 	RakNet::BitStream bs(packet->data, packet->length, false);
@@ -214,9 +315,9 @@ void healin(RakNet::Packet* packet) {
 	bs.Read(userName);
 	EPlayerClass sendclassinf;
 	bs.Read(sendclassinf);
-	int sendhealth;
-	bs.Read(sendhealth);
-	std::cout << userName << " is healing, his HP is " << sendhealth << " right now. " << std::endl;
+	int a[2];
+	bs.Read(a);
+	std::cout << userName <<"Player"<<a[1]<< " is healing, his HP is " << a[0] << " right now. " << std::endl;
 }
 //server
 void OnIncomingConnection(RakNet::Packet* packet)
@@ -441,6 +542,7 @@ void sendOrder(RakNet::Packet* packet) {
 						{
 							its->second.m_health -= currentplayer.Damge;
 							currentplayer.targetstring = its->second.m_name.c_str();
+							currentplayer.targetindex = its->second.index;
 						}
 						else {
 							wrongtarget = true;
@@ -456,6 +558,7 @@ void sendOrder(RakNet::Packet* packet) {
 						{
 							its->second.m_health -= currentplayer.Damge;
 							currentplayer.targetstring = its->second.m_name.c_str();
+							currentplayer.targetindex = its->second.index;
 						}
 						else {
 							wrongtarget = true;
@@ -469,6 +572,7 @@ void sendOrder(RakNet::Packet* packet) {
 						{
 							its->second.m_health -= currentplayer.Damge;
 							currentplayer.targetstring = its->second.m_name.c_str();
+							currentplayer.targetindex = its->second.index;
 						}
 						else {
 							wrongtarget = true;
@@ -492,53 +596,58 @@ void sendOrder(RakNet::Packet* packet) {
 	}
 	
 	
+	if (wrongtarget) {
+		currentplayer.order(currentplayer.playeraddress, false);
+	}
+	else {
+
+
+		for (std::map<unsigned long, SPlayer>::iterator its = m_players.begin(); its != m_players.end(); ++its)
+		{
+
+
+
+			SPlayer& player = its->second;
+
+			if (player.m_health <= 0)
+			{
+				player.isdealth = true;
+				player.losecondiction(player.playeraddress, true);
+				player.leave(player.playeraddress, false);
+				dealthcount++;
+			}
+
+		}
+
+
+		do
+		{
+			it++;
+			if (it == m_players.end())
+			{
+				it = m_players.begin();
+			}
+		} while (it->second.isdealth);
+
+		SPlayer& player = it->second;
+		if (dealthcount == 2)
+		{
+			player.wincondiction(player.playeraddress, true);
+			player.wincondiction(player.playeraddress, false);
+
+
+		}
+		else
+		{
 			
-			for (std::map<unsigned long, SPlayer>::iterator its = m_players.begin(); its != m_players.end(); ++its)
-			{
 
+				currentplayer.wait(currentplayer.playeraddress, false);
+				player.order(player.playeraddress, false);
 
+			
+		}
 
-				SPlayer& player = its->second;
-
-				if (player.m_health <= 0)
-				{
-					player.isdealth = true;
-					player.losecondiction(player.playeraddress, true);
-					player.losecondiction(player.playeraddress, false);
-					dealthcount++;
-				}
-
-			}
-
-
-			do
-			{
-				it++;
-				if (it == m_players.end())
-				{
-					it = m_players.begin();
-				}
-			} while (it->second.isdealth);
-
-			SPlayer& player = it->second;
-			if (dealthcount == 2)
-			{
-				player.wincondiction(player.playeraddress, true);
-				player.wincondiction(player.playeraddress, false);
-
-				
-			}
-			else
-			{
-				if (wrongtarget) {
-					currentplayer.order(currentplayer.playeraddress, false);
-				}
-				else {
-					player.order(player.playeraddress, false);
-				}
-			}
-
-
+	}
 			
 			
 		
@@ -553,21 +662,22 @@ void inputorder(RakNet::Packet* packet) {
 	g_networkState_mutex.lock();
 	g_networkState = NS_INPUTCHOICE;
 	g_networkState_mutex.unlock();
-	
+	std::cout << "your turn start right now" << std::endl;
 	
 	RakNet::BitStream bs(packet->data, packet->length, false);
 	RakNet::MessageID messageId;
 	bs.Read(messageId);
 	RakNet::RakString userName;
-	
+	int a[2];
+	bs.Read(a);
 	bs.Read(userName);
 	
 	EPlayerClass playerclass;
 	bs.Read(playerclass);
-	int health;
-	bs.Read(health);
-	std::cout << "User name: " << userName << std::endl;
-	std::cout << "health: " << health << std::endl;
+	//int health;
+	//bs.Read(health);
+	std::cout << "User name: " << userName <<" player "<<a[1]<<" "<< std::endl;
+	std::cout << "health: " << a[0] << std::endl;
 	if (playerclass == 0)
 	{
 		std::cout << "class: Mage"<< std::endl;
@@ -776,7 +886,10 @@ void InputHandler()
 		{
 
 			std::cout << "Enter your name to play or type quit to leave" << std::endl;
+			
 			std::cin >> userInput;
+			
+			
 			//quitting is not acceptable in our game, create a crash to teach lesson
 			assert(strcmp(userInput, "quit"));
 
@@ -807,7 +920,7 @@ void InputHandler()
 			static bool doOnce = false;
 			if (!doOnce)
 				std::cout << "pending..." << std::endl;
-
+			
 			doOnce = true;
 
 		}
@@ -818,7 +931,10 @@ void InputHandler()
 			{
 				std::cout << "room is full. Now choose your class" << std::endl;
 				std::cout << "type one of the classes. 0 represent Mage,1 represent Rogue and 2 represnet Knight." << std::endl;
+				
+				
 				std::cin >> classInput;
+				
 				EPlayerClass Playerclass;
 				while (classInput[0] != '0' && classInput[0] != '1' && classInput[0] != '2')
 				{
@@ -871,13 +987,36 @@ void InputHandler()
 			g_networkState_mutex.unlock();
 		}
 		else if (g_networkState == NS_RealStartwaitgame) {
-			static bool doOnce = false;
+			//static bool doOnce = false;
+			//static bool ischecked = false;
 			char statinput[255];
-			if (!doOnce)
-				std::cout << "waitting..." << std::endl;
+			if (!doOnce2)
+				std::cout << "d to check stats, any key to continue" << std::endl;
+			char thestatkey[255];
+			
+			if (!ischecked)
+			{
+				std::cin >> thestatkey;
+				if (thestatkey[0] == 'd')
+				{
+					RakNet::BitStream bs;
+					bs.Write((RakNet::MessageID)ID_CHECK_STAT);
+					//returns 0 when something is wrong
+					assert(g_rakPeerInterface->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, g_serverAddress, false));
+					ischecked = true;
+				}
+				else {
+					std::cout << "waitting your turn, " << std::endl;
+					ischecked = true;
+				}
+				
+				
+
+			}
+			
 			//std::cout << "type f to check stat " << std::endl;
 			//std::cin >> statinput;
-			doOnce = true;
+			doOnce2 = true;
 		}
 		else if (g_networkState == NS_INPUTCHOICE)
 		{
@@ -899,9 +1038,11 @@ void InputHandler()
 			std::cout << "health: " << health << std::endl;
 			std::cout << "class: " << playerclass << std::endl;
 			*/
+		
 			std::cin >> userInput;
 			while (userInput[0] != '0' && userInput[0] != '1'&& userInput[0] != 'f')
 			{
+				std::cout << "I don't understand. Try again. It is your turn. input 0 to attack, input 1 to heal and input f to skip " << std::endl;
 				std::cin >> userInput;
 			}
 			if (userInput[0] == 'f')
@@ -920,7 +1061,7 @@ void InputHandler()
 				stats a = damage;
 				bs.Write(a);
 				char attplayernum[255];
-				std::cout << "enter 0, 1, 2 to attack different player, if the target is dead you still hit it, this line will just show to you again." << std::endl;
+				std::cout << "enter 0, 1, 2 to attack different player, if the target is dead you still hit it, this line will just show to you again. " << std::endl;
 				std::cin >> attplayernum;
 				while (attplayernum[0] != '0' && attplayernum[0] != '1' && attplayernum[0] != '2')
 				{
@@ -931,7 +1072,7 @@ void InputHandler()
 			}
 			assert(g_rakPeerInterface->Send(&bs, HIGH_PRIORITY, RELIABLE_ORDERED, 0, g_serverAddress, false));
 			g_networkState_mutex.lock();
-			g_networkState = NS_RealStartwaitgame;
+			g_networkState = NS_Pending;
 			g_networkState_mutex.unlock();
 		}
 		std::this_thread::sleep_for(std::chrono::microseconds(1));
@@ -977,7 +1118,8 @@ void PacketHandler()
 				case ID_MAIN_GAME:
 					inputorder(packet);
 					break;
-				case ID_THELOOP:
+				case ID_THEWAITING:
+					waitting(packet);
 					break;
 				case ID_healinf:
 					healin(packet);
@@ -990,6 +1132,15 @@ void PacketHandler()
 					break;
 				case ID_dead:
 					dead(packet);
+					break;
+				case ID_CHECK_STAT:
+					checkstat(packet);
+					break;
+				case ID_SENT_STAT:
+					sendstat(packet);
+					break;
+				case ID_LEAVE:
+					leavegame(packet);
 					break;
 				default:
 					break;
